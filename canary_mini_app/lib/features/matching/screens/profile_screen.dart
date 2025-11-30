@@ -120,7 +120,7 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: AppConstants.spacingXl),
 
                   // Learning section
-                  _SectionHeader(
+                  const _SectionHeader(
                     icon: Icons.school_rounded,
                     title: 'Learning',
                   ),
@@ -153,7 +153,7 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: AppConstants.spacingXl),
 
                   // Bio section
-                  _SectionHeader(
+                  const _SectionHeader(
                     icon: Icons.person_rounded,
                     title: 'About',
                   ),
@@ -165,7 +165,7 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: AppConstants.spacingXl),
 
                   // Interests section
-                  _SectionHeader(
+                  const _SectionHeader(
                     icon: Icons.interests_rounded,
                     title: 'Interests',
                   ),
