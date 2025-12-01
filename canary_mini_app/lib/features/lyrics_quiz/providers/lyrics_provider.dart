@@ -52,17 +52,20 @@ class LyricsNotifier extends StateNotifier<LyricsState> {
   /// Load lyrics from word-level SRT file
   Future<void> _loadLyrics() async {
     try {
+      print('DEBUG: Starting to load lyrics...');
       state = state.copyWith(isLoading: true);
 
       // Load word-level lyrics from SRT file
       final phrases = await SrtParser.loadWordsFromAsset('assets/subtitles/louane.srt');
 
+      print('DEBUG: Lyrics loaded successfully: ${phrases.length} phrases');
       state = state.copyWith(
         phrases: phrases,
         isLoading: false,
         error: null,
       );
     } catch (e) {
+      print('DEBUG ERROR: Failed to load lyrics: $e');
       state = state.copyWith(
         isLoading: false,
         error: 'Failed to load lyrics: $e',
@@ -72,7 +75,10 @@ class LyricsNotifier extends StateNotifier<LyricsState> {
 
   /// Update highlighted phrase and word based on video position
   void updatePosition(Duration position) {
-    if (state.phrases.isEmpty) return;
+    if (state.phrases.isEmpty) {
+      print('DEBUG: No phrases loaded yet');
+      return;
+    }
 
     final seconds = position.inMilliseconds / 1000.0;
     const leadTime = 1.0; // Show lyrics 1 second before they start

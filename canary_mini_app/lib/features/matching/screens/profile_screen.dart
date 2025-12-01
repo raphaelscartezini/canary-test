@@ -18,44 +18,49 @@ class ProfileScreen extends StatelessWidget {
         slivers: [
           // App bar with user image
           SliverAppBar(
-            expandedHeight: 200,
+            expandedHeight: 300,
             pinned: true,
             leading: IconButton(
               icon: const Icon(Icons.arrow_back),
               onPressed: () => context.go('/users'),
             ),
             flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Theme.of(context).colorScheme.primaryContainer,
-                      Theme.of(context).colorScheme.surface,
-                    ],
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Profile image background
+                  Image.asset(
+                    user.imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Theme.of(context).colorScheme.primaryContainer,
+                              Theme.of(context).colorScheme.surface,
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                ),
-                child: Center(
-                  child: Hero(
-                    tag: 'user_${user.id}',
-                    child: CircleAvatar(
-                      radius: 60,
-                      backgroundColor:
-                          Theme.of(context).colorScheme.primary,
-                      child: Text(
-                        user.name[0],
-                        style: Theme.of(context)
-                            .textTheme
-                            .displayLarge
-                            ?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
+                  // Gradient overlay for text readability
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.3),
+                          Colors.black.withOpacity(0.7),
+                        ],
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
             ),
           ),

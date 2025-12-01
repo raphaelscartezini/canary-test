@@ -13,8 +13,11 @@ class LyricsDisplay extends ConsumerWidget {
     final currentPhraseIndex = lyricsState.currentPhraseIndex;
     final currentWordIndex = lyricsState.currentWordIndex;
 
+    print('DEBUG LyricsDisplay: phrases=${phrases.length}, phraseIdx=$currentPhraseIndex, wordIdx=$currentWordIndex');
+
     // Only show current phrase if we have lyrics
     if (phrases.isEmpty || currentPhraseIndex >= phrases.length) {
+      print('DEBUG LyricsDisplay: Not showing (empty or out of range)');
       return const SizedBox.shrink();
     }
 
@@ -25,8 +28,11 @@ class LyricsDisplay extends ConsumerWidget {
     // (show only when within 1 second before the first word starts)
     // This is handled in the provider, but we can add extra check here
     if (currentWordIndex < 0) {
+      print('DEBUG LyricsDisplay: Not showing (word index < 0)');
       return const SizedBox.shrink();
     }
+
+    print('DEBUG LyricsDisplay: Showing phrase "${ currentPhrase.text}" with ${words.length} words');
 
     return Center(
       child: Padding(

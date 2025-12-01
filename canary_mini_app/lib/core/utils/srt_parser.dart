@@ -1,43 +1,30 @@
 import 'package:flutter/services.dart';
-import 'package:subtitle/subtitle.dart';
 import '../../features/lyrics_quiz/models/lyric_line.dart';
 import '../../features/lyrics_quiz/models/word.dart';
 
 /// Utility class for parsing SRT subtitle files
 class SrtParser {
+  /// Parse SRT timestamp to seconds
+  static double _parseTimestamp(String timestamp) {
+    // Format: HH:MM:SS,mmm
+    final parts = timestamp.trim().split(':');
+    if (parts.length != 3) throw FormatException('Invalid timestamp: $timestamp');
+
+    final hours = int.parse(parts[0]);
+    final minutes = int.parse(parts[1]);
+    final secondsParts = parts[2].split(',');
+    final seconds = int.parse(secondsParts[0]);
+    final milliseconds = int.parse(secondsParts[1]);
+
+    return hours * 3600.0 + minutes * 60.0 + seconds + milliseconds / 1000.0;
+  }
   /// Load and parse an SRT file from assets
   /// Returns a list of LyricLine objects with text and timestamps
   static Future<List<LyricLine>> loadFromAsset(String assetPath) async {
     try {
       // Load the SRT file content from assets
       final srtContent = await rootBundle.loadString(assetPath);
-
-      // Parse the SRT content using the subtitle package
-      final controller = SubtitleController(
-        provider: SubtitleProvider.fromString(
-          data: srtContent,
-          type: SubtitleType.srt,
-        ),
-      );
-
-      await controller.initial();
-
-      // Convert subtitles to LyricLine objects
-      final lyrics = <LyricLine>[];
-      for (final subtitle in controller.subtitles) {
-        // Get the start time in seconds
-        final startTime = subtitle.start.inMilliseconds / 1000.0;
-
-        // Get the text (remove any formatting tags if present)
-        final text = subtitle.data;
-
-        lyrics.add(LyricLine(
-          text: text,
-          startTime: startTime,
-        ));
-      }
-
-      return lyrics;
+      return parseFromString(srtContent);
     } catch (e) {
       throw Exception('Failed to load SRT file: $e');
     }
@@ -46,19 +33,25 @@ class SrtParser {
   /// Parse SRT content from a string
   static List<LyricLine> parseFromString(String srtContent) {
     try {
-      final controller = SubtitleController(
-        provider: SubtitleProvider.fromString(
-          data: srtContent,
-          type: SubtitleType.srt,
-        ),
-      );
-
-      controller.initial();
-
       final lyrics = <LyricLine>[];
-      for (final subtitle in controller.subtitles) {
-        final startTime = subtitle.start.inMilliseconds / 1000.0;
-        final text = subtitle.data;
+
+      // Split into subtitle blocks (separated by blank lines)
+      final blocks = srtContent.split('\n\n').where((b) => b.trim().isNotEmpty);
+
+      for (final block in blocks) {
+        final lines = block.split('\n').where((l) => l.trim().isNotEmpty).toList();
+        if (lines.length < 3) continue; // Need at least: number, timestamp, text
+
+        // Line 0: index (skip)
+        // Line 1: timestamp line (format: start --> end)
+        final timestampLine = lines[1];
+        final timestamps = timestampLine.split('-->');
+        if (timestamps.length != 2) continue;
+
+        final startTime = _parseTimestamp(timestamps[0]);
+
+        // Lines 2+: text content
+        final text = lines.sublist(2).join(' ').trim();
 
         lyrics.add(LyricLine(
           text: text,
@@ -78,30 +71,43 @@ class SrtParser {
     try {
       // Load the SRT file content from assets
       final srtContent = await rootBundle.loadString(assetPath);
+      print('DEBUG: SRT content loaded, length: ${srtContent.length}');
 
-      // Parse the SRT content using the subtitle package
-      final controller = SubtitleController(
-        provider: SubtitleProvider.fromString(
-          data: srtContent,
-          type: SubtitleType.srt,
-        ),
-      );
-
-      await controller.initial();
-
-      // Convert subtitles to Word objects
+      // Convert subtitles to Word objects using custom parser
       final words = <Word>[];
-      for (final subtitle in controller.subtitles) {
-        final startTime = subtitle.start.inMilliseconds / 1000.0;
-        final endTime = subtitle.end.inMilliseconds / 1000.0;
-        final text = subtitle.data.trim();
 
-        words.add(Word(
-          text: text,
-          startTime: startTime,
-          endTime: endTime,
-        ));
+      // Split into subtitle blocks (separated by blank lines)
+      final blocks = srtContent.split('\n\n').where((b) => b.trim().isNotEmpty);
+      print('DEBUG: Found ${blocks.length} subtitle blocks');
+
+      for (final block in blocks) {
+        final lines = block.split('\n').where((l) => l.trim().isNotEmpty).toList();
+        if (lines.length < 3) continue; // Need at least: number, timestamp, text
+
+        try {
+          // Line 0: index (skip)
+          // Line 1: timestamp line (format: start --> end)
+          final timestampLine = lines[1];
+          final timestamps = timestampLine.split('-->');
+          if (timestamps.length != 2) continue;
+
+          final startTime = _parseTimestamp(timestamps[0]);
+          final endTime = _parseTimestamp(timestamps[1]);
+
+          // Lines 2+: text content
+          final text = lines.sublist(2).join(' ').trim();
+
+          words.add(Word(
+            text: text,
+            startTime: startTime,
+            endTime: endTime,
+          ));
+        } catch (e) {
+          print('DEBUG: Error parsing block: $e');
+          continue;
+        }
       }
+      print('DEBUG: Converted ${words.length} words from subtitles');
 
       // Group words into phrases (sentences)
       // A phrase ends when there's a significant gap (>0.5s) or punctuation
@@ -139,8 +145,13 @@ class SrtParser {
         }
       }
 
+      print('DEBUG: Created ${phrases.length} phrases from words');
+      if (phrases.isNotEmpty) {
+        print('DEBUG: First phrase: "${phrases.first.text}" (${phrases.first.words.length} words)');
+      }
       return phrases;
     } catch (e) {
+      print('DEBUG ERROR: Failed to load word-level SRT file: $e');
       throw Exception('Failed to load word-level SRT file: $e');
     }
   }

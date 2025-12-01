@@ -45,9 +45,6 @@ dependencies:
   # Video Player
   video_player: ^2.9.2
 
-  # SRT Subtitle Parser
-  subtitle: ^0.1.0-beta.3
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -74,6 +71,7 @@ flutter:
   assets:
     - assets/videos/
     - assets/subtitles/
+    - assets/profiles/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

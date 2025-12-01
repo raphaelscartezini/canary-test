@@ -1,0 +1,2688 @@
+Folder Structure
+--------------------------------------------------
+lib/
+    main.dart
+    core/
+        constants/
+            app_constants.dart
+        utils/
+            srt_parser.dart
+        theme/
+            app_theme.dart
+    features/
+        matching/
+            providers/
+                matching_provider.dart
+            models/
+                user.dart
+            screens/
+                user_list_screen.dart
+                profile_screen.dart
+            widgets/
+                matching_modal.dart
+                user_card.dart
+        home/
+            home_screen.dart
+        lyrics_quiz/
+            providers/
+                video_controller_provider.dart
+                lyrics_provider.dart
+                quiz_provider.dart
+            models/
+                word.dart
+                question.dart
+                lyric_line.dart
+            screens/
+                quiz_screen.dart
+                lyrics_screen.dart
+            widgets/
+                lyrics_display.dart
+                quiz_question_card.dart
+                video_placeholder.dart
+                video_player_widget.dart
+
+
+File Contents
+--------------------------------------------------
+
+
+main.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'core/theme/app_theme.dart';
+import 'core/constants/app_constants.dart';
+import 'features/home/home_screen.dart';
+import 'features/lyrics_quiz/screens/lyrics_screen.dart';
+import 'features/lyrics_quiz/screens/quiz_screen.dart';
+import 'features/matching/screens/user_list_screen.dart';
+import 'features/matching/screens/profile_screen.dart';
+import 'features/matching/models/user.dart';
+
+void main() {
+  runApp(
+    const ProviderScope(
+      child: MyApp(),
+    ),
+  );
+}
+
+// Router configuration
+final _router = GoRouter(
+  initialLocation: '/',
+  routes: [
+    GoRoute(
+      path: '/',
+      builder: (context, state) => const HomeScreen(),
+    ),
+    GoRoute(
+      path: '/lyrics',
+      builder: (context, state) => const LyricsScreen(),
+    ),
+    GoRoute(
+      path: '/quiz',
+      builder: (context, state) => const QuizScreen(),
+    ),
+    GoRoute(
+      path: '/users',
+      builder: (context, state) => const UserListScreen(),
+    ),
+    GoRoute(
+      path: '/profile/:userId',
+      builder: (context, state) {
+        final user = state.extra as User;
+        return ProfileScreen(user: user);
+      },
+    ),
+  ],
+);
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(
+      title: AppConstants.appName,
+      theme: AppTheme.lightTheme,
+      routerConfig: _router,
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+core/constants/app_constants.dart
+File type: .dart
+class AppConstants {
+  // Private constructor to prevent instantiation
+  AppConstants._();
+
+  // App Info
+  static const String appName = 'Canary Mini App';
+
+  // Spacing
+  static const double spacingXs = 4.0;
+  static const double spacingS = 8.0;
+  static const double spacingM = 16.0;
+  static const double spacingL = 24.0;
+  static const double spacingXl = 32.0;
+
+  // Border Radius
+  static const double radiusS = 8.0;
+  static const double radiusM = 12.0;
+  static const double radiusL = 16.0;
+
+  // Video Player
+  static const double videoAspectRatio = 9 / 16; // Vertical video
+
+  // Animation Durations
+  static const Duration shortDuration = Duration(milliseconds: 200);
+  static const Duration mediumDuration = Duration(milliseconds: 500);
+  static const Duration longDuration = Duration(seconds: 1);
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+core/utils/srt_parser.dart
+File type: .dart
+import 'package:flutter/services.dart';
+import '../../features/lyrics_quiz/models/lyric_line.dart';
+import '../../features/lyrics_quiz/models/word.dart';
+
+/// Utility class for parsing SRT subtitle files
+class SrtParser {
+  /// Parse SRT timestamp to seconds
+  static double _parseTimestamp(String timestamp) {
+    // Format: HH:MM:SS,mmm
+    final parts = timestamp.trim().split(':');
+    if (parts.length != 3) throw FormatException('Invalid timestamp: $timestamp');
+
+    final hours = int.parse(parts[0]);
+    final minutes = int.parse(parts[1]);
+    final secondsParts = parts[2].split(',');
+    final seconds = int.parse(secondsParts[0]);
+    final milliseconds = int.parse(secondsParts[1]);
+
+    return hours * 3600.0 + minutes * 60.0 + seconds + milliseconds / 1000.0;
+  }
+  /// Load and parse an SRT file from assets
+  /// Returns a list of LyricLine objects with text and timestamps
+  static Future<List<LyricLine>> loadFromAsset(String assetPath) async {
+    try {
+      // Load the SRT file content from assets
+      final srtContent = await rootBundle.loadString(assetPath);
+      return parseFromString(srtContent);
+    } catch (e) {
+      throw Exception('Failed to load SRT file: $e');
+    }
+  }
+
+  /// Parse SRT content from a string
+  static List<LyricLine> parseFromString(String srtContent) {
+    try {
+      final lyrics = <LyricLine>[];
+
+      // Split into subtitle blocks (separated by blank lines)
+      final blocks = srtContent.split('\n\n').where((b) => b.trim().isNotEmpty);
+
+      for (final block in blocks) {
+        final lines = block.split('\n').where((l) => l.trim().isNotEmpty).toList();
+        if (lines.length < 3) continue; // Need at least: number, timestamp, text
+
+        // Line 0: index (skip)
+        // Line 1: timestamp line (format: start --> end)
+        final timestampLine = lines[1];
+        final timestamps = timestampLine.split('-->');
+        if (timestamps.length != 2) continue;
+
+        final startTime = _parseTimestamp(timestamps[0]);
+
+        // Lines 2+: text content
+        final text = lines.sublist(2).join(' ').trim();
+
+        lyrics.add(LyricLine(
+          text: text,
+          startTime: startTime,
+        ));
+      }
+
+      return lyrics;
+    } catch (e) {
+      throw Exception('Failed to parse SRT content: $e');
+    }
+  }
+
+  /// Load and parse a word-level SRT file from assets
+  /// Groups words into phrases and returns a list of LyricPhrase objects
+  static Future<List<LyricPhrase>> loadWordsFromAsset(String assetPath) async {
+    try {
+      // Load the SRT file content from assets
+      final srtContent = await rootBundle.loadString(assetPath);
+      print('DEBUG: SRT content loaded, length: ${srtContent.length}');
+
+      // Convert subtitles to Word objects using custom parser
+      final words = <Word>[];
+
+      // Split into subtitle blocks (separated by blank lines)
+      final blocks = srtContent.split('\n\n').where((b) => b.trim().isNotEmpty);
+      print('DEBUG: Found ${blocks.length} subtitle blocks');
+
+      for (final block in blocks) {
+        final lines = block.split('\n').where((l) => l.trim().isNotEmpty).toList();
+        if (lines.length < 3) continue; // Need at least: number, timestamp, text
+
+        try {
+          // Line 0: index (skip)
+          // Line 1: timestamp line (format: start --> end)
+          final timestampLine = lines[1];
+          final timestamps = timestampLine.split('-->');
+          if (timestamps.length != 2) continue;
+
+          final startTime = _parseTimestamp(timestamps[0]);
+          final endTime = _parseTimestamp(timestamps[1]);
+
+          // Lines 2+: text content
+          final text = lines.sublist(2).join(' ').trim();
+
+          words.add(Word(
+            text: text,
+            startTime: startTime,
+            endTime: endTime,
+          ));
+        } catch (e) {
+          print('DEBUG: Error parsing block: $e');
+          continue;
+        }
+      }
+      print('DEBUG: Converted ${words.length} words from subtitles');
+
+      // Group words into phrases (sentences)
+      // A phrase ends when there's a significant gap (>0.5s) or punctuation
+      final phrases = <LyricPhrase>[];
+      List<Word> currentPhraseWords = [];
+
+      for (int i = 0; i < words.length; i++) {
+        currentPhraseWords.add(words[i]);
+
+        // Check if this is the end of a phrase
+        bool isEndOfPhrase = false;
+
+        // Check for punctuation
+        final hasEndPunctuation = words[i].text.endsWith(',') ||
+                                  words[i].text.endsWith('.') ||
+                                  words[i].text.endsWith('!') ||
+                                  words[i].text.endsWith('?');
+
+        // Check for gap to next word
+        final hasGap = i < words.length - 1 &&
+                       (words[i + 1].startTime - words[i].endTime) > 0.5;
+
+        // Last word
+        final isLast = i == words.length - 1;
+
+        isEndOfPhrase = hasEndPunctuation || hasGap || isLast;
+
+        if (isEndOfPhrase && currentPhraseWords.isNotEmpty) {
+          phrases.add(LyricPhrase(
+            words: List.from(currentPhraseWords),
+            startTime: currentPhraseWords.first.startTime,
+            endTime: currentPhraseWords.last.endTime,
+          ));
+          currentPhraseWords = [];
+        }
+      }
+
+      print('DEBUG: Created ${phrases.length} phrases from words');
+      if (phrases.isNotEmpty) {
+        print('DEBUG: First phrase: "${phrases.first.text}" (${phrases.first.words.length} words)');
+      }
+      return phrases;
+    } catch (e) {
+      print('DEBUG ERROR: Failed to load word-level SRT file: $e');
+      throw Exception('Failed to load word-level SRT file: $e');
+    }
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+core/theme/app_theme.dart
+File type: .dart
+import 'package:flutter/material.dart';
+
+class AppTheme {
+  // Private constructor to prevent instantiation
+  AppTheme._();
+
+  // Material 3 Color Scheme
+  static const ColorScheme _colorScheme = ColorScheme(
+    brightness: Brightness.light,
+    primary: Color(0xFF6750A4),
+    onPrimary: Color(0xFFFFFFFF),
+    primaryContainer: Color(0xFFEADDFF),
+    onPrimaryContainer: Color(0xFF21005D),
+    secondary: Color(0xFF625B71),
+    onSecondary: Color(0xFFFFFFFF),
+    secondaryContainer: Color(0xFFE8DEF8),
+    onSecondaryContainer: Color(0xFF1D192B),
+    tertiary: Color(0xFF7D5260),
+    onTertiary: Color(0xFFFFFFFF),
+    tertiaryContainer: Color(0xFFFFD8E4),
+    onTertiaryContainer: Color(0xFF31111D),
+    error: Color(0xFFB3261E),
+    onError: Color(0xFFFFFFFF),
+    errorContainer: Color(0xFFF9DEDC),
+    onErrorContainer: Color(0xFF410E0B),
+    surface: Color(0xFFFFFBFE),
+    onSurface: Color(0xFF1C1B1F),
+    surfaceContainerHighest: Color(0xFFE7E0EC),
+    onSurfaceVariant: Color(0xFF49454F),
+    outline: Color(0xFF79747E),
+    outlineVariant: Color(0xFFCAC4D0),
+    shadow: Color(0xFF000000),
+    scrim: Color(0xFF000000),
+    inverseSurface: Color(0xFF313033),
+    onInverseSurface: Color(0xFFF4EFF4),
+    inversePrimary: Color(0xFFD0BCFF),
+  );
+
+  static ThemeData get lightTheme {
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: _colorScheme,
+
+      // Text Theme
+      textTheme: const TextTheme(
+        displayLarge: TextStyle(fontSize: 57, fontWeight: FontWeight.w400),
+        displayMedium: TextStyle(fontSize: 45, fontWeight: FontWeight.w400),
+        displaySmall: TextStyle(fontSize: 36, fontWeight: FontWeight.w400),
+        headlineLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.w400),
+        headlineMedium: TextStyle(fontSize: 28, fontWeight: FontWeight.w400),
+        headlineSmall: TextStyle(fontSize: 24, fontWeight: FontWeight.w400),
+        titleLarge: TextStyle(fontSize: 22, fontWeight: FontWeight.w500),
+        titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+        titleSmall: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+        bodyLarge: TextStyle(fontSize: 16, fontWeight: FontWeight.w400),
+        bodyMedium: TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
+        bodySmall: TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
+        labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+        labelMedium: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+        labelSmall: TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+      ),
+
+      // Elevated Button Theme
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          elevation: 1,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+
+      // Filled Button Theme
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+
+      // Outlined Button Theme
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/matching/providers/matching_provider.dart
+File type: .dart
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/user.dart';
+
+/// State for matching process
+class MatchingState {
+  final User? matchingUser;
+  final bool isMatching;
+  final bool isMatched;
+
+  const MatchingState({
+    this.matchingUser,
+    this.isMatching = false,
+    this.isMatched = false,
+  });
+
+  MatchingState copyWith({
+    User? matchingUser,
+    bool? isMatching,
+    bool? isMatched,
+  }) {
+    return MatchingState(
+      matchingUser: matchingUser ?? this.matchingUser,
+      isMatching: isMatching ?? this.isMatching,
+      isMatched: isMatched ?? this.isMatched,
+    );
+  }
+}
+
+/// Matching state notifier
+class MatchingNotifier extends StateNotifier<MatchingState> {
+  MatchingNotifier() : super(const MatchingState());
+
+  /// Start matching process with a user
+  Future<void> startMatching(User user) async {
+    state = MatchingState(
+      matchingUser: user,
+      isMatching: true,
+      isMatched: false,
+    );
+
+    // Simulate network delay (1 second as per requirements)
+    await Future.delayed(const Duration(seconds: 1));
+
+    if (mounted) {
+      state = state.copyWith(
+        isMatching: false,
+        isMatched: true,
+      );
+    }
+  }
+
+  /// Reset matching state
+  void reset() {
+    state = const MatchingState();
+  }
+}
+
+/// Provider for matching state
+final matchingProvider =
+    StateNotifierProvider<MatchingNotifier, MatchingState>((ref) {
+  return MatchingNotifier();
+});
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/matching/models/user.dart
+File type: .dart
+class User {
+  final String id;
+  final String name;
+  final int age;
+  final String country;
+  final String countryFlag;
+  final String learningLanguage;
+  final String learningLanguageFlag;
+  final String imageUrl;
+  final String bio;
+  final List<String> interests;
+
+  const User({
+    required this.id,
+    required this.name,
+    required this.age,
+    required this.country,
+    required this.countryFlag,
+    required this.learningLanguage,
+    required this.learningLanguageFlag,
+    required this.imageUrl,
+    required this.bio,
+    required this.interests,
+  });
+
+  // Sample users for the matching feature
+  static const List<User> sampleUsers = [
+    User(
+      id: '1',
+      name: 'Sophie Martin',
+      age: 24,
+      country: 'France',
+      countryFlag: '🇫🇷',
+      learningLanguage: 'Spanish',
+      learningLanguageFlag: '🇪🇸',
+      imageUrl: 'assets/profiles/img-01.jpeg',
+      bio: 'Love traveling and learning new languages! Currently studying Spanish and looking for practice partners.',
+      interests: ['Travel', 'Music', 'Cooking', 'Photography'],
+    ),
+    User(
+      id: '2',
+      name: 'Lucas Silva',
+      age: 28,
+      country: 'Brazil',
+      countryFlag: '🇧🇷',
+      learningLanguage: 'French',
+      learningLanguageFlag: '🇫🇷',
+      imageUrl: 'assets/profiles/img-02.jpeg',
+      bio: 'Software developer passionate about languages. Want to improve my French for work opportunities.',
+      interests: ['Technology', 'Sports', 'Movies', 'Reading'],
+    ),
+    User(
+      id: '3',
+      name: 'Yuki Tanaka',
+      age: 22,
+      country: 'Japan',
+      countryFlag: '🇯🇵',
+      learningLanguage: 'English',
+      learningLanguageFlag: '🇬🇧',
+      imageUrl: 'assets/profiles/img-03.jpeg',
+      bio: 'University student studying English literature. Looking for conversation practice and cultural exchange!',
+      interests: ['Anime', 'Books', 'Gaming', 'Art'],
+    ),
+    User(
+      id: '4',
+      name: 'Emma Johnson',
+      age: 26,
+      country: 'United States',
+      countryFlag: '🇺🇸',
+      learningLanguage: 'Japanese',
+      learningLanguageFlag: '🇯🇵',
+      imageUrl: 'assets/profiles/img-04.jpeg',
+      bio: 'Marketing professional learning Japanese. Dream of visiting Tokyo soon! Let\'s practice together.',
+      interests: ['Fashion', 'Food', 'Yoga', 'Travel'],
+    ),
+  ];
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/matching/screens/user_list_screen.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/constants/app_constants.dart';
+import '../models/user.dart';
+import '../providers/matching_provider.dart';
+import '../widgets/user_card.dart';
+import '../widgets/matching_modal.dart';
+
+class UserListScreen extends ConsumerWidget {
+  const UserListScreen({super.key});
+
+  void _showMatchingModal(BuildContext context, WidgetRef ref, User user) {
+    final matchingNotifier = ref.read(matchingProvider.notifier);
+
+    // Start matching process
+    matchingNotifier.startMatching(user);
+
+    // Show modal
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppConstants.radiusL),
+        ),
+      ),
+      builder: (context) => MatchingModal(user: user),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Find Language Partners'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.go('/'),
+        ),
+      ),
+      body: ListView.builder(
+        padding: const EdgeInsets.all(AppConstants.spacingM),
+        itemCount: User.sampleUsers.length,
+        itemBuilder: (context, index) {
+          final user = User.sampleUsers[index];
+          return UserCard(
+            user: user,
+            onMatchTap: () => _showMatchingModal(context, ref, user),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/matching/screens/profile_screen.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/constants/app_constants.dart';
+import '../models/user.dart';
+
+class ProfileScreen extends StatelessWidget {
+  const ProfileScreen({
+    super.key,
+    required this.user,
+  });
+
+  final User user;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          // App bar with user image
+          SliverAppBar(
+            expandedHeight: 300,
+            pinned: true,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => context.go('/users'),
+            ),
+            flexibleSpace: FlexibleSpaceBar(
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Profile image background
+                  Image.asset(
+                    user.imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Theme.of(context).colorScheme.primaryContainer,
+                              Theme.of(context).colorScheme.surface,
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  // Gradient overlay for text readability
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.3),
+                          Colors.black.withOpacity(0.7),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Profile content
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(AppConstants.spacingL),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Name and age
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        user.name,
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      const SizedBox(width: AppConstants.spacingS),
+                      Text(
+                        '${user.age}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppConstants.spacingS),
+
+                  // Location
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.location_on_rounded,
+                        size: 20,
+                        color:
+                            Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: AppConstants.spacingXs),
+                      Text(
+                        '${user.countryFlag} ${user.country}',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppConstants.spacingXl),
+
+                  // Learning section
+                  const _SectionHeader(
+                    icon: Icons.school_rounded,
+                    title: 'Learning',
+                  ),
+                  const SizedBox(height: AppConstants.spacingM),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(AppConstants.spacingM),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.secondaryContainer,
+                      borderRadius:
+                          BorderRadius.circular(AppConstants.radiusM),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          user.learningLanguageFlag,
+                          style: const TextStyle(fontSize: 32),
+                        ),
+                        const SizedBox(width: AppConstants.spacingM),
+                        Text(
+                          user.learningLanguage,
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppConstants.spacingXl),
+
+                  // Bio section
+                  const _SectionHeader(
+                    icon: Icons.person_rounded,
+                    title: 'About',
+                  ),
+                  const SizedBox(height: AppConstants.spacingM),
+                  Text(
+                    user.bio,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: AppConstants.spacingXl),
+
+                  // Interests section
+                  const _SectionHeader(
+                    icon: Icons.interests_rounded,
+                    title: 'Interests',
+                  ),
+                  const SizedBox(height: AppConstants.spacingM),
+                  Wrap(
+                    spacing: AppConstants.spacingS,
+                    runSpacing: AppConstants.spacingS,
+                    children: user.interests.map((interest) {
+                      return Chip(
+                        label: Text(interest),
+                        labelStyle: Theme.of(context).textTheme.bodyMedium,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppConstants.spacingM,
+                          vertical: AppConstants.spacingS,
+                        ),
+                        backgroundColor:
+                            Theme.of(context).colorScheme.primaryContainer,
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: AppConstants.spacingXl),
+
+                  // Action buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () {
+                            // In a real app, this would send a message
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Message sent to ${user.name}!'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.message_rounded),
+                          label: const Text('Message'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: AppConstants.spacingM,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppConstants.spacingM),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            // In a real app, this would start a video call
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content:
+                                    Text('Calling ${user.name}...'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.videocam_rounded),
+                          label: const Text('Video Call'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: AppConstants.spacingM,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.icon,
+    required this.title,
+  });
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(
+          icon,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+        const SizedBox(width: AppConstants.spacingS),
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+        ),
+      ],
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/matching/widgets/matching_modal.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/constants/app_constants.dart';
+import '../models/user.dart';
+import '../providers/matching_provider.dart';
+
+class MatchingModal extends ConsumerWidget {
+  const MatchingModal({
+    super.key,
+    required this.user,
+  });
+
+  final User user;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final matchingState = ref.watch(matchingProvider);
+    final matchingNotifier = ref.read(matchingProvider.notifier);
+
+    return Container(
+      padding: EdgeInsets.only(
+        top: AppConstants.spacingL,
+        left: AppConstants.spacingL,
+        right: AppConstants.spacingL,
+        bottom: MediaQuery.of(context).viewInsets.bottom + AppConstants.spacingL,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: AppConstants.spacingL),
+
+          // Animated content switcher
+          AnimatedSwitcher(
+            duration: AppConstants.mediumDuration,
+            child: matchingState.isMatching
+                ? _MatchingContent(user: user)
+                : _MatchedContent(
+                    user: user,
+                    onViewProfile: () {
+                      matchingNotifier.reset();
+                      Navigator.pop(context);
+                      context.push('/profile/${user.id}', extra: user);
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Content shown while matching (loading state)
+class _MatchingContent extends StatelessWidget {
+  const _MatchingContent({required this.user});
+
+  final User user;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      key: const ValueKey('matching'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Animated spinner
+        SizedBox(
+          width: 80,
+          height: 80,
+          child: CircularProgressIndicator(
+            strokeWidth: 6,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingL),
+
+        Text(
+          'Matching...',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+        ),
+        const SizedBox(height: AppConstants.spacingS),
+        Text(
+          'Finding the perfect language partner',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: AppConstants.spacingXl),
+      ],
+    );
+  }
+}
+
+/// Content shown after successful match
+class _MatchedContent extends StatelessWidget {
+  const _MatchedContent({
+    required this.user,
+    required this.onViewProfile,
+  });
+
+  final User user;
+  final VoidCallback onViewProfile;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      key: const ValueKey('matched'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Success icon
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Theme.of(context).colorScheme.primaryContainer,
+          ),
+          child: Icon(
+            Icons.celebration_rounded,
+            size: 48,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingL),
+
+        Text(
+          'Yes! You matched with',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: AppConstants.spacingS),
+
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              user.name,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+            ),
+            const SizedBox(width: AppConstants.spacingS),
+            const Text(
+              '🎉',
+              style: TextStyle(fontSize: 28),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppConstants.spacingXl),
+
+        // View Profile button
+        FilledButton(
+          onPressed: onViewProfile,
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(double.infinity, 56),
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.person_rounded),
+              SizedBox(width: AppConstants.spacingS),
+              Text('View Profile'),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingM),
+      ],
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/matching/widgets/user_card.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import '../../../core/constants/app_constants.dart';
+import '../models/user.dart';
+
+class UserCard extends StatelessWidget {
+  const UserCard({
+    super.key,
+    required this.user,
+    required this.onMatchTap,
+  });
+
+  final User user;
+  final VoidCallback onMatchTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppConstants.spacingM),
+      clipBehavior: Clip.antiAlias,
+      elevation: 2,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Large profile image at top (takes good chunk of card)
+          AspectRatio(
+            aspectRatio: 4 / 3,
+            child: Image.asset(
+              user.imageUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  child: Icon(
+                    Icons.person,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // User info section
+          Padding(
+            padding: const EdgeInsets.all(AppConstants.spacingM),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Name and age
+                Row(
+                  children: [
+                    Text(
+                      user.name,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(width: AppConstants.spacingXs),
+                    Text(
+                      '${user.age}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppConstants.spacingXs),
+
+                // Country
+                Row(
+                  children: [
+                    Text(
+                      user.countryFlag,
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(width: AppConstants.spacingXs),
+                    Text(
+                      user.country,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppConstants.spacingM),
+
+                // Learning language badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppConstants.spacingM,
+                    vertical: AppConstants.spacingS,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(AppConstants.radiusM),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.school_rounded, size: 18),
+                      const SizedBox(width: AppConstants.spacingS),
+                      Text(
+                        'Learning: ${user.learningLanguage} ${user.learningLanguageFlag}',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppConstants.spacingM),
+
+                // Bio
+                Text(
+                  user.bio,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: AppConstants.spacingM),
+
+                // Interests
+                Wrap(
+                  spacing: AppConstants.spacingS,
+                  runSpacing: AppConstants.spacingS,
+                  children: user.interests.map((interest) {
+                    return Chip(
+                      label: Text(interest),
+                      labelStyle: Theme.of(context).textTheme.labelSmall,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppConstants.spacingS,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppConstants.spacingM),
+
+                // Match button
+                FilledButton(
+                  onPressed: onMatchTap,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 48),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.favorite_rounded, size: 20),
+                      const SizedBox(width: AppConstants.spacingS),
+                      Text('Learn with ${user.name.split(' ')[0]}'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/home/home_screen.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../core/constants/app_constants.dart';
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(AppConstants.spacingL),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // App Title
+              Text(
+                AppConstants.appName,
+                style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppConstants.spacingS),
+              Text(
+                'Technical Assessment',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppConstants.spacingXl * 2),
+
+              // Test #1 Card
+              _TestCard(
+                title: 'Test #1',
+                subtitle: 'Lyrics + Quiz',
+                description:
+                    'Watch a song with lyrics and take a comprehension quiz',
+                icon: Icons.music_note_rounded,
+                onTap: () => context.go('/lyrics'),
+              ),
+              const SizedBox(height: AppConstants.spacingL),
+
+              // Test #2 Card
+              _TestCard(
+                title: 'Test #2',
+                subtitle: 'Matching + Profiles',
+                description:
+                    'Connect with language learners and view their profiles',
+                icon: Icons.people_rounded,
+                onTap: () => context.go('/users'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TestCard extends StatelessWidget {
+  const _TestCard({
+    required this.title,
+    required this.subtitle,
+    required this.description,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final String description;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(AppConstants.spacingL),
+          child: Row(
+            children: [
+              // Icon
+              Container(
+                padding: const EdgeInsets.all(AppConstants.spacingM),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(AppConstants.radiusM),
+                ),
+                child: Icon(
+                  icon,
+                  size: 32,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: AppConstants.spacingM),
+
+              // Content
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                        ),
+                        const SizedBox(width: AppConstants.spacingS),
+                        Text(
+                          subtitle,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppConstants.spacingXs),
+                    Text(
+                      description,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Arrow
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 20,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/providers/video_controller_provider.dart
+File type: .dart
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:video_player/video_player.dart';
+
+/// Video controller state notifier to keep it alive across navigation
+class VideoControllerNotifier extends StateNotifier<VideoPlayerController?> {
+  VideoControllerNotifier() : super(null) {
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    final controller = VideoPlayerController.asset('assets/videos/louane.mp4');
+    await controller.initialize();
+    state = controller;
+  }
+
+  @override
+  void dispose() {
+    state?.dispose();
+    super.dispose();
+  }
+}
+
+/// Provider that keeps the video controller alive
+final videoControllerNotifierProvider =
+    StateNotifierProvider<VideoControllerNotifier, VideoPlayerController?>(
+  (ref) => VideoControllerNotifier(),
+);
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/providers/lyrics_provider.dart
+File type: .dart
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:video_player/video_player.dart';
+import '../models/lyric_line.dart';
+import '../models/word.dart';
+import '../../../core/utils/srt_parser.dart';
+
+/// State class for lyrics with word-level highlighting
+class LyricsState {
+  final List<LyricPhrase> phrases;
+  final int currentPhraseIndex;
+  final int currentWordIndex; // Index of current word within the phrase
+  final bool isLoading;
+  final String? error;
+
+  const LyricsState({
+    required this.phrases,
+    this.currentPhraseIndex = 0,
+    this.currentWordIndex = -1, // -1 means no word is active
+    this.isLoading = false,
+    this.error,
+  });
+
+  LyricsState copyWith({
+    List<LyricPhrase>? phrases,
+    int? currentPhraseIndex,
+    int? currentWordIndex,
+    bool? isLoading,
+    String? error,
+  }) {
+    return LyricsState(
+      phrases: phrases ?? this.phrases,
+      currentPhraseIndex: currentPhraseIndex ?? this.currentPhraseIndex,
+      currentWordIndex: currentWordIndex ?? this.currentWordIndex,
+      isLoading: isLoading ?? this.isLoading,
+      error: error ?? this.error,
+    );
+  }
+}
+
+/// Lyrics notifier to handle video sync with word-level highlighting
+class LyricsNotifier extends StateNotifier<LyricsState> {
+  LyricsNotifier()
+      : super(const LyricsState(
+          phrases: [],
+          currentPhraseIndex: 0,
+          currentWordIndex: -1, // Start with no word highlighted
+          isLoading: true,
+        )) {
+    _loadLyrics();
+  }
+
+  /// Load lyrics from word-level SRT file
+  Future<void> _loadLyrics() async {
+    try {
+      print('DEBUG: Starting to load lyrics...');
+      state = state.copyWith(isLoading: true);
+
+      // Load word-level lyrics from SRT file
+      final phrases = await SrtParser.loadWordsFromAsset('assets/subtitles/louane.srt');
+
+      print('DEBUG: Lyrics loaded successfully: ${phrases.length} phrases');
+      state = state.copyWith(
+        phrases: phrases,
+        isLoading: false,
+        error: null,
+      );
+    } catch (e) {
+      print('DEBUG ERROR: Failed to load lyrics: $e');
+      state = state.copyWith(
+        isLoading: false,
+        error: 'Failed to load lyrics: $e',
+      );
+    }
+  }
+
+  /// Update highlighted phrase and word based on video position
+  void updatePosition(Duration position) {
+    if (state.phrases.isEmpty) {
+      print('DEBUG: No phrases loaded yet');
+      return;
+    }
+
+    final seconds = position.inMilliseconds / 1000.0;
+    const leadTime = 1.0; // Show lyrics 1 second before they start
+
+    // Find the current phrase (considering lead time)
+    int newPhraseIndex = -1; // -1 means no phrase should be shown yet
+    for (int i = 0; i < state.phrases.length; i++) {
+      final phraseStart = state.phrases[i].startTime - leadTime;
+      final phraseEnd = state.phrases[i].endTime;
+
+      if (seconds >= phraseStart && seconds <= phraseEnd) {
+        newPhraseIndex = i;
+        break;
+      } else if (i == state.phrases.length - 1 && seconds > phraseEnd) {
+        // After the last phrase
+        newPhraseIndex = i;
+      }
+    }
+
+    // Don't show anything if we're before the first phrase (with lead time)
+    if (newPhraseIndex == -1) {
+      if (state.currentPhraseIndex != 0 || state.currentWordIndex != -1) {
+        state = state.copyWith(
+          currentPhraseIndex: 0,
+          currentWordIndex: -1,
+        );
+      }
+      return;
+    }
+
+    // Find the current word within the phrase
+    int newWordIndex = -1; // -1 means no word is active yet (before first word starts)
+    if (newPhraseIndex >= 0 && newPhraseIndex < state.phrases.length) {
+      final currentPhrase = state.phrases[newPhraseIndex];
+
+      // Check if we're before the first word of the phrase starts
+      if (seconds < currentPhrase.words.first.startTime) {
+        newWordIndex = -1; // No word highlighted yet
+      } else {
+        // Find which word is currently being sung
+        for (int i = 0; i < currentPhrase.words.length; i++) {
+          if (seconds >= currentPhrase.words[i].startTime && seconds <= currentPhrase.words[i].endTime) {
+            newWordIndex = i;
+            break;
+          } else if (seconds < currentPhrase.words[i].startTime) {
+            newWordIndex = i > 0 ? i - 1 : -1;
+            break;
+          } else if (i == currentPhrase.words.length - 1) {
+            newWordIndex = i;
+          }
+        }
+      }
+    }
+
+    if (newPhraseIndex != state.currentPhraseIndex || newWordIndex != state.currentWordIndex) {
+      state = state.copyWith(
+        currentPhraseIndex: newPhraseIndex,
+        currentWordIndex: newWordIndex,
+      );
+    }
+  }
+
+  void reset() {
+    state = state.copyWith(
+      currentPhraseIndex: 0,
+      currentWordIndex: -1, // Reset to no word highlighted
+    );
+  }
+}
+
+/// Provider for lyrics state
+final lyricsProvider = StateNotifierProvider<LyricsNotifier, LyricsState>((ref) {
+  return LyricsNotifier();
+});
+
+/// Video player controller provider - kept alive to preserve state
+final videoControllerProvider = Provider.autoDispose<VideoPlayerController>((ref) {
+  // Using the Louane video asset
+  final controller = VideoPlayerController.asset('assets/videos/louane.mp4');
+
+  // Keep the controller alive even when navigating away
+  final keepAliveLink = ref.keepAlive();
+
+  // Don't automatically dispose - keep alive indefinitely
+  // This preserves video position across navigation
+
+  // Clean up when provider is disposed
+  ref.onDispose(() {
+    controller.dispose();
+    keepAliveLink.close();
+  });
+
+  return controller;
+});
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/providers/quiz_provider.dart
+File type: .dart
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/question.dart';
+
+/// State class to hold quiz data
+class QuizState {
+  final List<int?> selectedAnswers;
+  final bool isSubmitted;
+  final int score;
+
+  const QuizState({
+    required this.selectedAnswers,
+    this.isSubmitted = false,
+    this.score = 0,
+  });
+
+  QuizState copyWith({
+    List<int?>? selectedAnswers,
+    bool? isSubmitted,
+    int? score,
+  }) {
+    return QuizState(
+      selectedAnswers: selectedAnswers ?? this.selectedAnswers,
+      isSubmitted: isSubmitted ?? this.isSubmitted,
+      score: score ?? this.score,
+    );
+  }
+}
+
+/// Quiz state notifier
+class QuizNotifier extends StateNotifier<QuizState> {
+  QuizNotifier()
+      : super(QuizState(
+          selectedAnswers: List.filled(Question.sampleQuestions.length, null),
+        ));
+
+  void selectAnswer(int questionIndex, int answerIndex) {
+    final newAnswers = List<int?>.from(state.selectedAnswers);
+    newAnswers[questionIndex] = answerIndex;
+    state = state.copyWith(selectedAnswers: newAnswers);
+  }
+
+  void submitQuiz() {
+    int correctCount = 0;
+
+    for (int i = 0; i < Question.sampleQuestions.length; i++) {
+      final selectedAnswer = state.selectedAnswers[i];
+      final correctAnswer = Question.sampleQuestions[i].correctAnswerIndex;
+
+      if (selectedAnswer == correctAnswer) {
+        correctCount++;
+      }
+    }
+
+    state = state.copyWith(
+      isSubmitted: true,
+      score: correctCount,
+    );
+  }
+
+  void reset() {
+    state = QuizState(
+      selectedAnswers: List.filled(Question.sampleQuestions.length, null),
+    );
+  }
+}
+
+/// Provider for quiz state
+final quizProvider = StateNotifierProvider<QuizNotifier, QuizState>((ref) {
+  return QuizNotifier();
+});
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/models/word.dart
+File type: .dart
+class Word {
+  final String text;
+  final double startTime; // Time in seconds when this word starts
+  final double endTime; // Time in seconds when this word ends
+
+  const Word({
+    required this.text,
+    required this.startTime,
+    required this.endTime,
+  });
+}
+
+class LyricPhrase {
+  final List<Word> words;
+  final double startTime; // Start time of the phrase
+  final double endTime; // End time of the phrase
+
+  const LyricPhrase({
+    required this.words,
+    required this.startTime,
+    required this.endTime,
+  });
+
+  // Get the full phrase text
+  String get text => words.map((w) => w.text).join(' ');
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/models/question.dart
+File type: .dart
+class Question {
+  final String questionText;
+  final List<String> options;
+  final int correctAnswerIndex;
+
+  const Question({
+    required this.questionText,
+    required this.options,
+    required this.correctAnswerIndex,
+  });
+
+  // Sample quiz questions about French language learning
+  static const List<Question> sampleQuestions = [
+    Question(
+      questionText: "What does 'merci' mean in English?",
+      options: ['Hello', 'Thank you', 'Goodbye'],
+      correctAnswerIndex: 1,
+    ),
+    Question(
+      questionText: "How do you say 'good morning' in French?",
+      options: ['Bonjour', 'Bonsoir', 'Bonne nuit'],
+      correctAnswerIndex: 0,
+    ),
+    Question(
+      questionText: "What does 's'il vous plaît' mean?",
+      options: ['Excuse me', 'Please', 'Sorry'],
+      correctAnswerIndex: 1,
+    ),
+  ];
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/models/lyric_line.dart
+File type: .dart
+class LyricLine {
+  final String text;
+  final double startTime; // Time in seconds when this line should be highlighted
+
+  const LyricLine({
+    required this.text,
+    required this.startTime,
+  });
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/screens/quiz_screen.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/constants/app_constants.dart';
+import '../models/question.dart';
+import '../providers/quiz_provider.dart';
+import '../widgets/quiz_question_card.dart';
+
+class QuizScreen extends ConsumerWidget {
+  const QuizScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final quizState = ref.watch(quizProvider);
+    final quizNotifier = ref.read(quizProvider.notifier);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('French Quiz'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            // Reset quiz when going back
+            quizNotifier.reset();
+            context.go('/lyrics');
+          },
+        ),
+      ),
+      body: Column(
+        children: [
+          // Quiz questions
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(AppConstants.spacingM),
+              itemCount: Question.sampleQuestions.length,
+              itemBuilder: (context, index) {
+                final question = Question.sampleQuestions[index];
+                return QuizQuestionCard(
+                  question: question,
+                  questionNumber: index + 1,
+                  selectedAnswer: quizState.selectedAnswers[index],
+                  onAnswerSelected: (answerIndex) {
+                    quizNotifier.selectAnswer(index, answerIndex);
+                  },
+                  isSubmitted: quizState.isSubmitted,
+                );
+              },
+            ),
+          ),
+
+          // Result or Submit button
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(AppConstants.spacingM),
+              child: Column(
+                children: [
+                  // Show result if submitted
+                  if (quizState.isSubmitted) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(AppConstants.spacingL),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        borderRadius:
+                            BorderRadius.circular(AppConstants.radiusM),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(
+                            quizState.score == Question.sampleQuestions.length
+                                ? Icons.emoji_events_rounded
+                                : Icons.star_rounded,
+                            size: 48,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(height: AppConstants.spacingS),
+                          Text(
+                            'You got ${quizState.score}/${Question.sampleQuestions.length} correct',
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineSmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: AppConstants.spacingXs),
+                          Text(
+                            quizState.score == Question.sampleQuestions.length
+                                ? 'Perfect score! 🎉'
+                                : quizState.score >= 2
+                                    ? 'Great job! 👏'
+                                    : 'Keep practicing! 💪',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onPrimaryContainer,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppConstants.spacingM),
+
+                    // Retake Quiz button
+                    FilledButton(
+                      onPressed: () {
+                        quizNotifier.reset();
+                      },
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 56),
+                      ),
+                      child: const Text('Retake Quiz'),
+                    ),
+                  ] else ...[
+                    // Submit button (only enabled if all questions answered)
+                    FilledButton(
+                      onPressed: quizState.selectedAnswers.contains(null)
+                          ? null
+                          : () {
+                              quizNotifier.submitQuiz();
+                            },
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 56),
+                      ),
+                      child: const Text('Submit'),
+                    ),
+                    if (quizState.selectedAnswers.contains(null))
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            top: AppConstants.spacingS),
+                        child: Text(
+                          'Please answer all questions to submit',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/screens/lyrics_screen.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/constants/app_constants.dart';
+import '../widgets/video_player_widget.dart';
+import '../widgets/lyrics_display.dart';
+import '../providers/lyrics_provider.dart';
+
+class LyricsScreen extends ConsumerWidget {
+  const LyricsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    void handleBack() {
+      // Pause the video before navigating back
+      final controller = ref.read(videoControllerProvider);
+      controller.pause();
+      context.go('/');
+    }
+
+    void handleTakeQuiz() {
+      // Pause the video before going to quiz
+      final controller = ref.read(videoControllerProvider);
+      controller.pause();
+      context.go('/quiz');
+    }
+
+    return Scaffold(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Full screen video background
+          const VideoPlayerWidget(),
+
+          // Lyrics overlay on bottom half
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 80, // Above the Take Quiz button (64px + safe area padding)
+            top: MediaQuery.of(context).size.height * 0.5,
+            child: const LyricsDisplay(),
+          ),
+
+          // Take Quiz button at bottom
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              child: FilledButton(
+                onPressed: handleTakeQuiz,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 64),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.zero,
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                child: const Text('Take Quiz'),
+              ),
+            ),
+          ),
+
+          // Back button overlay (top left)
+          Positioned(
+            top: 0,
+            left: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(AppConstants.spacingM),
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: handleBack,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.black.withOpacity(0.5),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/widgets/lyrics_display.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/constants/app_constants.dart';
+import '../providers/lyrics_provider.dart';
+
+class LyricsDisplay extends ConsumerWidget {
+  const LyricsDisplay({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lyricsState = ref.watch(lyricsProvider);
+    final phrases = lyricsState.phrases;
+    final currentPhraseIndex = lyricsState.currentPhraseIndex;
+    final currentWordIndex = lyricsState.currentWordIndex;
+
+    print('DEBUG LyricsDisplay: phrases=${phrases.length}, phraseIdx=$currentPhraseIndex, wordIdx=$currentWordIndex');
+
+    // Only show current phrase if we have lyrics
+    if (phrases.isEmpty || currentPhraseIndex >= phrases.length) {
+      print('DEBUG LyricsDisplay: Not showing (empty or out of range)');
+      return const SizedBox.shrink();
+    }
+
+    final currentPhrase = phrases[currentPhraseIndex];
+    final words = currentPhrase.words;
+
+    // Don't show lyrics if the first word hasn't started yet
+    // (show only when within 1 second before the first word starts)
+    // This is handled in the provider, but we can add extra check here
+    if (currentWordIndex < 0) {
+      print('DEBUG LyricsDisplay: Not showing (word index < 0)');
+      return const SizedBox.shrink();
+    }
+
+    print('DEBUG LyricsDisplay: Showing phrase "${ currentPhrase.text}" with ${words.length} words');
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppConstants.spacingL),
+        child: AnimatedSwitcher(
+          duration: AppConstants.shortDuration,
+          child: Wrap(
+            key: ValueKey(currentPhraseIndex),
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: List.generate(words.length, (index) {
+              final word = words[index];
+              final isCurrentWord = index == currentWordIndex;
+              final isPastWord = currentWordIndex >= 0 && index < currentWordIndex;
+
+              return AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 150),
+                style: Theme.of(context).textTheme.headlineSmall!.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: isCurrentWord
+                          ? Colors.yellow
+                          : (isPastWord ? Colors.white.withOpacity(0.7) : Colors.white),
+                      fontSize: isCurrentWord ? 32 : 24,
+                      height: 1.4,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black.withOpacity(0.9),
+                          blurRadius: isCurrentWord ? 8 : 6,
+                          offset: Offset(0, isCurrentWord ? 3 : 2),
+                        ),
+                        Shadow(
+                          color: Colors.black.withOpacity(0.9),
+                          blurRadius: isCurrentWord ? 16 : 12,
+                          offset: Offset(0, isCurrentWord ? 4 : 3),
+                        ),
+                      ],
+                    ),
+                child: Text(word.text),
+              );
+            }),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/widgets/quiz_question_card.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import '../../../core/constants/app_constants.dart';
+import '../models/question.dart';
+
+class QuizQuestionCard extends StatelessWidget {
+  const QuizQuestionCard({
+    super.key,
+    required this.question,
+    required this.questionNumber,
+    required this.selectedAnswer,
+    required this.onAnswerSelected,
+    required this.isSubmitted,
+  });
+
+  final Question question;
+  final int questionNumber;
+  final int? selectedAnswer;
+  final Function(int) onAnswerSelected;
+  final bool isSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppConstants.spacingM),
+      child: Padding(
+        padding: const EdgeInsets.all(AppConstants.spacingL),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Question text
+            Text(
+              'Question $questionNumber',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+            ),
+            const SizedBox(height: AppConstants.spacingS),
+            Text(
+              question.questionText,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: AppConstants.spacingM),
+
+            // Answer options
+            ...List.generate(question.options.length, (index) {
+              final isSelected = selectedAnswer == index;
+              final isCorrect = index == question.correctAnswerIndex;
+              final showResult = isSubmitted;
+
+              Color? backgroundColor;
+              Color? borderColor;
+              Color? textColor;
+
+              if (showResult) {
+                if (isCorrect) {
+                  backgroundColor = Theme.of(context)
+                      .colorScheme
+                      .primaryContainer
+                      .withOpacity(0.5);
+                  borderColor = Theme.of(context).colorScheme.primary;
+                  textColor = Theme.of(context).colorScheme.primary;
+                } else if (isSelected && !isCorrect) {
+                  backgroundColor = Theme.of(context)
+                      .colorScheme
+                      .errorContainer
+                      .withOpacity(0.5);
+                  borderColor = Theme.of(context).colorScheme.error;
+                  textColor = Theme.of(context).colorScheme.error;
+                }
+              } else if (isSelected) {
+                backgroundColor = Theme.of(context).colorScheme.primaryContainer;
+                borderColor = Theme.of(context).colorScheme.primary;
+              }
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: AppConstants.spacingS),
+                child: InkWell(
+                  onTap: isSubmitted ? null : () => onAnswerSelected(index),
+                  borderRadius: BorderRadius.circular(AppConstants.radiusM),
+                  child: Container(
+                    padding: const EdgeInsets.all(AppConstants.spacingM),
+                    decoration: BoxDecoration(
+                      color: backgroundColor,
+                      border: Border.all(
+                        color: borderColor ??
+                            Theme.of(context).colorScheme.outline,
+                        width: borderColor != null ? 2 : 1,
+                      ),
+                      borderRadius: BorderRadius.circular(AppConstants.radiusM),
+                    ),
+                    child: Row(
+                      children: [
+                        // Option letter (A, B, C)
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: textColor?.withOpacity(0.2) ??
+                                Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                          ),
+                          child: Center(
+                            child: Text(
+                              String.fromCharCode(65 + index), // A, B, C
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: textColor,
+                                  ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: AppConstants.spacingM),
+
+                        // Option text
+                        Expanded(
+                          child: Text(
+                            question.options[index],
+                            style:
+                                Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                      color: textColor,
+                                    ),
+                          ),
+                        ),
+
+                        // Check/Cross icon for submitted state
+                        if (showResult && (isCorrect || isSelected))
+                          Icon(
+                            isCorrect ? Icons.check_circle : Icons.cancel,
+                            color: isCorrect
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.error,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/widgets/video_placeholder.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import '../../../core/constants/app_constants.dart';
+
+class VideoPlaceholder extends StatelessWidget {
+  const VideoPlaceholder({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return AspectRatio(
+      aspectRatio: AppConstants.videoAspectRatio,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppConstants.radiusL),
+        child: Container(
+          color: Colors.black87,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Fake YouTube thumbnail placeholder
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                      Colors.black87,
+                    ],
+                  ),
+                ),
+                child: Center(
+                  child: Icon(
+                    Icons.music_video_rounded,
+                    size: 80,
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                ),
+              ),
+
+              // Play button
+              Center(
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Theme.of(context).colorScheme.primary,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.play_arrow_rounded,
+                    size: 48,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+
+              // Mock video info overlay (top)
+              Positioned(
+                top: AppConstants.spacingM,
+                left: AppConstants.spacingM,
+                right: AppConstants.spacingM,
+                child: Text(
+                  'Song Title - Artist Name',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withOpacity(0.5),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                ),
+              ),
+
+              // Mock duration overlay (bottom right)
+              Positioned(
+                bottom: AppConstants.spacingM,
+                right: AppConstants.spacingM,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppConstants.spacingS,
+                    vertical: AppConstants.spacingXs,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(AppConstants.radiusS),
+                  ),
+                  child: Text(
+                    '3:24',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
+
+
+features/lyrics_quiz/widgets/video_player_widget.dart
+File type: .dart
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:video_player/video_player.dart';
+import '../../../core/constants/app_constants.dart';
+import '../providers/lyrics_provider.dart';
+
+class VideoPlayerWidget extends ConsumerStatefulWidget {
+  const VideoPlayerWidget({super.key});
+
+  @override
+  ConsumerState<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
+}
+
+class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
+  VideoPlayerController? _controller;
+  bool _isInitialized = false;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeVideo();
+  }
+
+  Future<void> _initializeVideo() async {
+    try {
+      _controller = ref.read(videoControllerProvider);
+
+      // Only initialize if not already initialized
+      if (!_controller!.value.isInitialized) {
+        await _controller!.initialize();
+      }
+
+      // Listen to video position changes to sync lyrics
+      _controller!.addListener(_onVideoPositionChanged);
+
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+        });
+      }
+    }
+  }
+
+  void _onVideoPositionChanged() {
+    if (_controller != null && _controller!.value.isInitialized) {
+      // Update lyrics position
+      ref.read(lyricsProvider.notifier).updatePosition(_controller!.value.position);
+    }
+  }
+
+  void _togglePlayPause() {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    setState(() {
+      if (_controller!.value.isPlaying) {
+        _controller!.pause();
+      } else {
+        _controller!.play();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_onVideoPositionChanged);
+    // Don't dispose controller here - it's managed by the provider
+    super.dispose();
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Watch the controller to keep the provider alive
+    final controller = ref.watch(videoControllerProvider);
+
+    if (_hasError) {
+      return _buildErrorWidget();
+    }
+
+    if (!_isInitialized || _controller == null) {
+      return _buildLoadingWidget();
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Full screen video with cover fit
+        ClipRRect(
+          borderRadius: BorderRadius.zero,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+            // Video player with cover fit to crop to 9:16
+            FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: _controller!.value.size.width,
+                height: _controller!.value.size.height,
+                child: VideoPlayer(_controller!),
+              ),
+            ),
+
+              // Play/Pause overlay
+              GestureDetector(
+                onTap: _togglePlayPause,
+                child: Container(
+                  color: Colors.transparent,
+                  child: Center(
+                    child: AnimatedOpacity(
+                      opacity: _controller!.value.isPlaying ? 0.0 : 1.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.9),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.play_arrow_rounded,
+                          size: 48,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoadingWidget() {
+    return Container(
+      color: Colors.black87,
+      child: const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return Container(
+      color: Colors.black87,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: Colors.white.withOpacity(0.7),
+            ),
+            const SizedBox(height: AppConstants.spacingM),
+            Text(
+              'Video not available',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Colors.white.withOpacity(0.7),
+                  ),
+            ),
+            const SizedBox(height: AppConstants.spacingS),
+            Text(
+              'Add a video file to assets/videos/louane.mp4',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.white.withOpacity(0.5),
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+--------------------------------------------------
+File End
+--------------------------------------------------
