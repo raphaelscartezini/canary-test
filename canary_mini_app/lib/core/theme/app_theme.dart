@@ -60,14 +60,6 @@ class AppTheme {
         labelSmall: TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
       ),
 
-      // Card Theme
-      cardTheme: CardTheme(
-        elevation: 1,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-      ),
-
       // Elevated Button Theme
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(

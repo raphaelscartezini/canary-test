@@ -1,97 +1,84 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
-import '../widgets/video_placeholder.dart';
+import '../widgets/video_player_widget.dart';
 import '../widgets/lyrics_display.dart';
+import '../providers/lyrics_provider.dart';
 
-class LyricsScreen extends StatefulWidget {
+class LyricsScreen extends ConsumerWidget {
   const LyricsScreen({super.key});
 
   @override
-  State<LyricsScreen> createState() => _LyricsScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    void handleBack() {
+      // Pause the video before navigating back
+      final controller = ref.read(videoControllerProvider);
+      controller.pause();
+      context.go('/');
+    }
 
-class _LyricsScreenState extends State<LyricsScreen> {
-  int _currentLineIndex = 0;
-
-  // Sample French song lyrics
-  final List<String> _lyrics = [
-    "Bonjour, comment ça va?",
-    "Je m'appelle Marie",
-    "J'aime la musique",
-    "Et danser sous la pluie",
-    "",
-    "Merci beaucoup mon ami",
-    "Pour cette belle journée",
-    "S'il vous plaît, restez ici",
-    "Nous allons continuer",
-    "",
-    "La vie est magnifique",
-    "Quand on est ensemble",
-    "Chaque moment est unique",
-    "Et mon cœur se balance",
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    // Simulate lyrics progression every 2 seconds
-    _startLyricsAnimation();
-  }
-
-  void _startLyricsAnimation() {
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && _currentLineIndex < _lyrics.length - 1) {
-        setState(() {
-          _currentLineIndex++;
-        });
-        _startLyricsAnimation();
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.sizeOf(context).height;
-    final videoHeight = screenHeight * 0.6;
+    void handleTakeQuiz() {
+      // Pause the video before going to quiz
+      final controller = ref.read(videoControllerProvider);
+      controller.pause();
+      context.go('/quiz');
+    }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Song Lyrics'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/'),
-        ),
-      ),
-      body: Column(
+      body: Stack(
+        fit: StackFit.expand,
         children: [
-          // Video section (60% of screen)
-          SizedBox(
-            height: videoHeight,
-            child: const Padding(
-              padding: EdgeInsets.all(AppConstants.spacingM),
-              child: VideoPlaceholder(),
-            ),
+          // Full screen video background
+          const VideoPlayerWidget(),
+
+          // Lyrics overlay on bottom half
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 80, // Above the Take Quiz button (64px + safe area padding)
+            top: MediaQuery.of(context).size.height * 0.5,
+            child: const LyricsDisplay(),
           ),
 
-          // Lyrics section (remaining space)
-          Expanded(
-            child: LyricsDisplay(
-              lyrics: _lyrics,
-              currentLineIndex: _currentLineIndex,
-            ),
-          ),
-
-          // Take Quiz button
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(AppConstants.spacingM),
+          // Take Quiz button at bottom
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
               child: FilledButton(
-                onPressed: () => context.go('/quiz'),
+                onPressed: handleTakeQuiz,
                 style: FilledButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 56),
+                  minimumSize: const Size(double.infinity, 64),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.zero,
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 child: const Text('Take Quiz'),
+              ),
+            ),
+          ),
+
+          // Back button overlay (top left)
+          Positioned(
+            top: 0,
+            left: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(AppConstants.spacingM),
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: handleBack,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.black.withOpacity(0.5),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
               ),
             ),
           ),
